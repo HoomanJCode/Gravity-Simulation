@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Burst;
 using Unity.Profiling;
 using UnityEngine;
 
@@ -18,7 +19,8 @@ public sealed class GravitySimulationApp : MonoBehaviour
     private static readonly string[] ModeNames =
     {
         "Single threaded", "C# async", "C# parallel",
-        "Unity modular main thread", "Unity Jobs", "Unity coroutine"
+        "Unity modular main thread", "Unity Jobs (no Burst)", "Unity coroutine",
+        "Unity Jobs (Burst)"
     };
 
     private readonly List<GravityBodyView> _views = new List<GravityBodyView>();
@@ -269,12 +271,14 @@ public sealed class GravitySimulationApp : MonoBehaviour
 
         GUILayout.Space(8);
         GUILayout.Label("PROCESSING MODE", _labelStyle);
-        for (int row = 0; row < 3; row++)
+        for (int row = 0; row < 4; row++)
         {
             GUILayout.BeginHorizontal();
             for (int column = 0; column < 2; column++)
             {
                 int index = row * 2 + column;
+                if (index >= ModeNames.Length)
+                    break;
                 DrawChoice(ModeNames[index], (int)_mode == index, () => SelectMode((SimulationMode)index));
             }
             GUILayout.EndHorizontal();
@@ -305,6 +309,8 @@ public sealed class GravitySimulationApp : MonoBehaviour
         GUILayout.Label("Physics step: " + (_stepper == null ? "—" : _stepper.LastStepMilliseconds.ToString("0.000") + " ms"), _labelStyle);
         GUILayout.Label("Frame time (avg): " + (1000f / Mathf.Max(_smoothedFps, 0.01f)).ToString("0.00") + " ms   FPS: " + _smoothedFps.ToString("0"), _labelStyle);
         GUILayout.Label("Profiler marker: GravitySimulation." + ModeNames[(int)_mode].Replace(' ', '.'), _labelStyle);
+        if (_mode == SimulationMode.UnityJobsBurst)
+            GUILayout.Label("Burst compiler: " + (BurstCompiler.IsEnabled ? "enabled" : "disabled (managed fallback)"), _labelStyle);
         GUILayout.Space(5);
         GUILayout.Label("Tip: open Window → Analysis → Profiler and compare modes at the same body count.", _labelStyle);
         GUILayout.FlexibleSpace();

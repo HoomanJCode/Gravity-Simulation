@@ -51,6 +51,7 @@ public static class GravitySceneGeneration
             case SimulationMode.UnityModularMainThread: return "UnityModularMainThread";
             case SimulationMode.UnityJobs: return "UnityJobs";
             case SimulationMode.UnityCoroutine: return "UnityCoroutine";
+            case SimulationMode.UnityJobsBurst: return "UnityJobsBurst";
             default: return mode.ToString();
         }
     }

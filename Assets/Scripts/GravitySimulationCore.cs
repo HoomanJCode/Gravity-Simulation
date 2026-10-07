@@ -2,8 +2,10 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 
@@ -15,7 +17,8 @@ public enum SimulationMode
     CSharpParallel,
     UnityModularMainThread,
     UnityJobs,
-    UnityCoroutine
+    UnityCoroutine,
+    UnityJobsBurst
 }
 
 /// <summary>Constrains motion to a plane or leaves all three spatial axes active.</summary>
@@ -172,6 +175,7 @@ internal static class GravityStepperFactory
             case SimulationMode.UnityModularMainThread: return new ModularMainThreadStepper(initialStates, owner);
             case SimulationMode.UnityJobs: return new UnityJobsGravityStepper(initialStates);
             case SimulationMode.UnityCoroutine: return new CoroutineGravityStepper(initialStates, owner);
+            case SimulationMode.UnityJobsBurst: return new UnityJobsBurstGravityStepper(initialStates);
             default: return new SingleThreadGravityStepper(initialStates);
         }
     }
@@ -265,7 +269,7 @@ internal sealed class ParallelGravityStepper : IGravityStepper
     public void Dispose() { }
 }
 
-/// <summary>Jobs implementation schedules independent body calculations and completes before presentation.</summary>
+/// <summary>Schedules independent body calculations without Burst and completes before presentation.</summary>
 internal sealed class UnityJobsGravityStepper : IGravityStepper
 {
     private NativeArray<BodyState> _nativeStates;
@@ -316,19 +320,99 @@ internal sealed class UnityJobsGravityStepper : IGravityStepper
 
         public void Execute(int index)
         {
-            Vector3 acceleration = Vector3.zero;
-            Vector3 position = States[index].Position;
-            for (int other = 0; other < States.Length; other++)
-            {
-                if (other == index) continue;
-                Vector3 offset = States[other].Position - position;
-                if (Is2D) offset.z = 0f;
-                float distanceSquared = offset.sqrMagnitude + SofteningSquared;
-                float inverseDistance = 1f / Mathf.Sqrt(distanceSquared);
-                acceleration += offset * (Gravity * States[other].Mass * inverseDistance * inverseDistance * inverseDistance);
-            }
-            Accelerations[index] = acceleration;
+            Accelerations[index] = GravityJobMath.CalculateAcceleration(
+                States, index, Gravity, SofteningSquared, Is2D);
         }
+    }
+}
+
+/// <summary>Schedules the same independent force calculations through Burst-compiled jobs.</summary>
+internal sealed class UnityJobsBurstGravityStepper : IGravityStepper
+{
+    private NativeArray<BodyState> _nativeStates;
+    private NativeArray<Vector3> _nativeAccelerations;
+    public BodyState[] States { get; private set; }
+    public double LastStepMilliseconds { get; private set; }
+
+    public UnityJobsBurstGravityStepper(BodyState[] initialStates)
+    {
+        States = (BodyState[])initialStates.Clone();
+        _nativeStates = new NativeArray<BodyState>(States.Length, Allocator.Persistent);
+        _nativeAccelerations = new NativeArray<Vector3>(States.Length, Allocator.Persistent);
+    }
+
+    public void Step(float deltaTime, float gravity, float softening, SimulationDimension dimension)
+    {
+        var timer = Stopwatch.StartNew();
+        for (int i = 0; i < States.Length; i++)
+            _nativeStates[i] = States[i];
+
+        var job = new BurstGravityAccelerationJob
+        {
+            States = _nativeStates,
+            Accelerations = _nativeAccelerations,
+            Gravity = gravity,
+            SofteningSquared = softening * softening,
+            Is2D = dimension == SimulationDimension.TwoD
+        };
+        JobHandle handle = job.Schedule(States.Length, 32);
+        handle.Complete();
+        States = GravityMath.Integrate(States, _nativeAccelerations, deltaTime, dimension == SimulationDimension.TwoD);
+        LastStepMilliseconds = timer.Elapsed.TotalMilliseconds;
+    }
+
+    public void Dispose()
+    {
+        if (_nativeStates.IsCreated) _nativeStates.Dispose();
+        if (_nativeAccelerations.IsCreated) _nativeAccelerations.Dispose();
+    }
+
+    [BurstCompile]
+    private struct BurstGravityAccelerationJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<BodyState> States;
+        [WriteOnly] public NativeArray<Vector3> Accelerations;
+        public float Gravity;
+        public float SofteningSquared;
+        public bool Is2D;
+
+        public void Execute(int index)
+        {
+            Accelerations[index] = GravityJobMath.CalculateAcceleration(
+                States, index, Gravity, SofteningSquared, Is2D);
+        }
+    }
+}
+
+/// <summary>Blittable math shared by the managed and Burst-compiled Unity job variants.</summary>
+internal static class GravityJobMath
+{
+    public static Vector3 CalculateAcceleration(
+        NativeArray<BodyState> states, int index, float gravity, float softeningSquared, bool is2D)
+    {
+        BodyState body = states[index];
+        float x = 0f;
+        float y = 0f;
+        float z = 0f;
+
+        for (int other = 0; other < states.Length; other++)
+        {
+            if (other == index)
+                continue;
+
+            BodyState source = states[other];
+            float dx = source.Position.x - body.Position.x;
+            float dy = source.Position.y - body.Position.y;
+            float dz = is2D ? 0f : source.Position.z - body.Position.z;
+            float distanceSquared = dx * dx + dy * dy + dz * dz + softeningSquared;
+            float inverseDistance = 1f / math.sqrt(distanceSquared);
+            float scale = gravity * source.Mass * inverseDistance * inverseDistance * inverseDistance;
+            x += dx * scale;
+            y += dy * scale;
+            z += dz * scale;
+        }
+
+        return new Vector3(x, y, z);
     }
 }
 
