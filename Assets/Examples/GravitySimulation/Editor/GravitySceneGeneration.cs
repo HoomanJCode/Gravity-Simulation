@@ -8,22 +8,24 @@ using UnityEngine.SceneManagement;
 /// <summary>Generates one preset scene for each execution strategy.</summary>
 public static class GravitySceneGeneration
 {
-    private const string TemplateScenePath = "Assets/Scenes/SampleScene.unity";
+    private const string TemplateScenePath = "Assets/Examples/GravitySimulation/Scenes/SampleScene.unity";
 
     [MenuItem("Tools/Gravity Simulation/Generate Mode Scenes")]
     public static void Build()
     {
+        // Keep the starter scene useful while making gravity boot opt-in per scene.
+        EditorSceneManager.OpenScene(TemplateScenePath, OpenSceneMode.Single);
+        GravitySceneMode starterPreset = FindOrCreatePreset();
+        SetPreset(starterPreset, SimulationMode.SingleThreaded);
+        EditorSceneManager.SaveScene(SceneManager.GetActiveScene());
+
         var generatedScenes = new List<EditorBuildSettingsScene>();
         foreach (SimulationMode mode in System.Enum.GetValues(typeof(SimulationMode)))
         {
             EditorSceneManager.OpenScene(TemplateScenePath, OpenSceneMode.Single);
-            var presetObject = new GameObject("Gravity Scene Mode");
-            GravitySceneMode preset = presetObject.AddComponent<GravitySceneMode>();
-            var serializedPreset = new SerializedObject(preset);
-            serializedPreset.FindProperty("_initialMode").enumValueIndex = (int)mode;
-            serializedPreset.ApplyModifiedPropertiesWithoutUndo();
+            SetPreset(FindOrCreatePreset(), mode);
 
-            string scenePath = "Assets/Scenes/Gravity_" + SceneName(mode) + ".unity";
+            string scenePath = "Assets/Examples/GravitySimulation/Scenes/Gravity_" + SceneName(mode) + ".unity";
             if (!EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), scenePath))
                 throw new System.Exception("Could not save generated scene: " + scenePath);
             generatedScenes.Add(new EditorBuildSettingsScene(scenePath, true));
@@ -39,6 +41,21 @@ public static class GravitySceneGeneration
         EditorBuildSettings.scenes = buildScenes.ToArray();
         AssetDatabase.SaveAssets();
         Debug.Log("GRAVITY_SCENES_GENERATED count=" + generatedScenes.Count);
+    }
+
+    private static GravitySceneMode FindOrCreatePreset()
+    {
+        GravitySceneMode preset = Object.FindAnyObjectByType<GravitySceneMode>();
+        if (preset != null)
+            return preset;
+        return new GameObject("Gravity Scene Mode").AddComponent<GravitySceneMode>();
+    }
+
+    private static void SetPreset(GravitySceneMode preset, SimulationMode mode)
+    {
+        var serializedPreset = new SerializedObject(preset);
+        serializedPreset.FindProperty("_initialMode").enumValueIndex = (int)mode;
+        serializedPreset.ApplyModifiedPropertiesWithoutUndo();
     }
 
     private static string SceneName(SimulationMode mode)

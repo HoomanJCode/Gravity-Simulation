@@ -60,10 +60,13 @@ public sealed class GravitySimulationApp : MonoBehaviour
             return;
 
         GravitySceneMode sceneMode = FindAnyObjectByType<GravitySceneMode>();
+        // The comparison example has its own controller and should not boot gravity too.
+        if (sceneMode == null)
+            return;
+
         var appObject = new GameObject("Gravity Simulation App");
         var app = appObject.AddComponent<GravitySimulationApp>();
-        if (sceneMode != null)
-            app.SetModePreset(sceneMode.InitialMode);
+        app.SetModePreset(sceneMode.InitialMode);
     }
 
     private void Awake()
