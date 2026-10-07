@@ -18,6 +18,8 @@ The batch scene has sliders for workload size, a progress bar, compute and wall-
 
 The sample calculation repeats a small multiply/add operation for each number. It is intentionally simple so it is easy to explain: the calculation stays the same while the scheduling changes.
 
+This scene does not create spheres or simulate gravity. It isolates batch scheduling: every mode receives the same deterministic `float` array and performs the same calculation. Use the checksum to confirm the results match, then compare timing and responsiveness in the Profiler. The gravity scene is the visual physics demonstration.
+
 | Mode | Simple explanation |
 | --- | --- |
 | Single threaded | One loop processes every number on Unity's main thread. |
